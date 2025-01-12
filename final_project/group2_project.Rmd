@@ -1,0 +1,319 @@
+---
+title: 'Group2 Project'
+author: "Fabian Bauer, Grace Kelley, Florian Rivalta, Margaritha Wanker, Raphael Zährer"
+date: "2024-12-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+set.seed(24101968)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, 
+                      error = FALSE, cache = TRUE)
+```
+# Data Analytics Project
+This project analyzes job data in the data field, focusing on predicting salaries based on various job characteristics such as experience level, company size, and work setting. The aim is to use machine learning methods to build regression and classification models to derive actionable insights and evaluate their effectiveness.
+
+Before starting with the actual analysis, we installed the required R packages first.
+
+# Libraries
+```{r}
+library(countrycode)
+library(ggplot2)
+library(rpart)
+library(partykit)
+library(ranger)
+library(caret)
+library(e1071)
+```
+
+## Data pre-processing
+
+The dataset is loaded using read.csv.
+```{r}
+data_jobs <- read.csv("jobsInData.csv", stringsAsFactors = TRUE)
+```
+The structure and initial rows are inspected using head() and str(). This allows a better understanding for the variables and their data types.
+```{r}
+head(data_jobs)
+```
+```{r}
+str(data_jobs)
+```
+Missing values are checked using colSums(is.na()). This ensures data completeness for subsequent analyses.
+```{r}
+print(colSums(is.na(data_jobs)))
+```
+Variables such as salary_currency and salary are dropped as they are redundant or irrelevant for modeling.
+The job_title variable is also removed due to its high cardinality (125 levels), which could lead to overfitting in the models.
+Country-level variables (employee_residence and company_location) are converted to their respective continents using the countrycode package, reducing the dimensionality of these variables.
+The original country variables are dropped after the transformation.
+```{r}
+# omitting the unnecessary variables
+data_jobs <- subset(data_jobs, select = -c(salary_currency, salary))
+
+# we are also omitting job_title because we have 125 levels here which can cause overfitting
+data_jobs <- subset(data_jobs, select = -c(job_title))
+
+
+# changing countries in employee_residence and company_location to continents because there are too many variables
+data_jobs$employee_continent <- countrycode(data_jobs$employee_residence, 
+                                            origin = "country.name", 
+                                            destination = "continent")
+
+
+data_jobs$company_continent <- countrycode(data_jobs$company_location, 
+                                           origin = "country.name", 
+                                           destination = "continent")
+
+
+# remove the variables with all the countries
+data_jobs <- subset(data_jobs, select = -c(employee_residence, company_location))
+```
+The cleaned dataset is re-inspected with str() to ensure proper formatting and transformations.
+```{r}
+str(data_jobs)
+```
+## Regression
+
+### Linear Regression
+
+The target variable salary_in_usd is log-transformed to address non-linearities and stabilize variance.
+```{r}
+data_jobs$salary_in_usd <- log(data_jobs$salary_in_usd)
+```
+A linear regression model is fitted with all predictors using lm() and its summary is evaluated. Metrics such as adjusted R-squared and coefficients are examined to understand model fit and variable significance.
+```{r}
+fitAll <- lm(salary_in_usd ~ ., data = data_jobs)
+summary(fitAll)
+```
+The model explains with an R-squared 41.4% of the variability in log-transformed salaries using the predictors. The adjusted R-squared increased from approximately 34% to 41.22% after we applied a log transformation to the salaries. While this increase suggests a modest improvement in the model's explanatory power, an adjusted R-squared of 41% indicates that the model still only explains a little less than half of the variation in the data. This is generally considered a weak to moderate fit, meaning there is significant room for further model improvement. On average, the model's predicted log-salary deviates from the actual log-salary by 0.36 (RSE = 0.3607).
+
+Experience level, job category, and employee continent have the largest impacts on salaries. Specialized roles like Machine Learning and AI and locations like America significantly increase salaries. Freelance employment, operational roles, and company locations in Asia or Europe tend to lower salaries.
+
+Stepwise backward selection (step()) is used to refine the model by removing non-significant variables iteratively. 
+```{r}
+fitStepwise = step(fitAll, direction = "backward")
+summary(fitStepwise)
+```
+The stepwise regression with the backward elimination method was applied to refine the model for predicting the log-transformed salary_in_usd. This approach iteratively included and excluded predictors to optimize the model fit based on the AIC criterion. Although the AIC was reduced during this process, the adjusted R-squared did not improve beyond 41.22%. This indicates that the model's explanatory power remained limited, and further refinement did not lead to a significant improvement in fit.
+
+Experience level, job specialization, and employee continent are the most critical factors for predicting salary.
+Employers seeking to attract top talent should focus on roles in Machine Learning, AI, and Data Science while offering competitive salaries for higher experience levels. Employees in the Americas and specialized roles are likely to earn significantly higher salaries, highlighting geographic and role-specific salary trends.
+
+The full regression includes all 28 predictors, some of which are not statistically significant. The stepwise regression focuses on a smaller subset of predictors by excluding those with less impact. Both models have similar performance metrics, but stepwise regression achieves the same fit with fewer predictors, improving interpretability.
+
+### Tree
+
+A full decision tree is built using rpart with no complexity pruning (cp = 0). 
+```{r}
+full_tree <- rpart(salary_in_usd ~ ., data = data_jobs, control = list(cp = 0))
+plot(as.party(full_tree))
+```
+
+Viewing and plotting the tree complexity parameter (cp) for pruning.
+```{r}
+printcp(full_tree)
+rpart::plotcp(full_tree, xlim = c(0, 50))
+```
+
+The regression tree was fitted to predict the log-transformed salary in USD using the available variables.
+7 splits were chosen to balance accuracy and simplicity, minimizing cross-validation error without overfitting.
+The tree explains around 40.7% of salary variability, indicating moderate predictive power.
+The standard deviation of residuals is 0.3607, showing reasonable accuracy in predictions.
+Both company and employee location significantly impact salaries, reflecting regional cost-of-living and market trends. Higher levels of experience, like Senior or Executive roles, are strongly linked to higher salaries. Fields like Machine Learning and AI or Data Science command higher pay, while roles like Data Quality and Strategy are associated with lower salaries. Freelancers and part-time workers earn less, while remote work tends to pay slightly less than in-person roles.
+
+Complexity parameters (printcp) are examined to prune the tree. The pruned tree reduces overfitting by focusing on the most critical splits.
+```{r}
+pruned_tree <- prune(full_tree, cp = full_tree$cptable[7, "CP"])
+plot(as.party(pruned_tree))
+```
+
+The tree's first split is based on the employee's continent, highlighting the regional variation in salary trends. For example, employees in America and Europe often receive higher salaries compared to those in Asia or Africa. For employees in Asia and Europe, experience level further splits the data into Entry-level and Senior/Executive categories. More experienced employees consistently earn higher salaries. Specific job categories, such as Data Science and Research, Machine Learning, and AI, are associated with higher salaries, reflecting the demand for these specialized skills. On the other hand, roles like Cloud and Database Engineering are linked to comparatively lower pay.
+
+
+### Random Forest
+
+A random forest model is trained using ranger with salary_in_usd as the target variable. Permutation-based variable importance is computed.
+```{r}
+rf <- ranger(salary_in_usd ~ ., data = data_jobs, probability = FALSE, importance = "permutation")
+print(rf)
+```
+The random forest regression model predicts salaries in USD based on eight variables from the dataset. Using 500 decision trees, the model captures complex relationships by averaging predictions across trees, which enhances reliability.
+
+At 40.8% R squared, the model explains a significant portion of salary variation but leaves room for improvement. With an average error of 0.1313, the model provides a moderate level of accuracy.
+
+Looking at the variable importance:
+```{r}
+importance_df <- data.frame(Variable = names(importance(rf)), Importance = importance(rf))
+
+ggplot(importance_df, aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ylab("Importance") +
+  xlab("Variables") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8))
+```
+
+The model likely identifies variables like experience level, job category and company as well as employee continent as the most significant predictors.
+
+
+### Cross-validation and comparison of the 3 models
+
+A 10-fold cross-validation is conducted to evaluate and compare the performance of the three models (stepwise regression, pruned decision tree, and random forest) using Mean Squared Error (MSE). Results are visualized with a boxplot, showing the variability and overall accuracy of each model.
+```{r}
+n <- nrow(data_jobs)
+fold <- 10
+set.seed(123)
+
+folds <- sample(rep(1:fold, ceiling(n / fold)), n)
+mse_results <- list()
+
+for (tfold in seq_len(fold)) {
+  train_idx <- which(folds != tfold)
+  test_idx <- which(folds == tfold)
+  
+  rf_model <- ranger(salary_in_usd ~ ., data = data_jobs[train_idx, ])
+  tree_model <- rpart(salary_in_usd ~ ., data = data_jobs[train_idx, ])
+  prune(tree_model, cp = full_tree$cptable[7, "CP"])
+  fitStepwise_model <- step(lm(salary_in_usd ~ ., data = data_jobs[train_idx, ]))
+  
+  p_rf <- predict(rf_model, data = data_jobs[test_idx, ])$predictions
+  p_tr <- predict(tree_model, newdata = data_jobs[test_idx, ])
+  p_lr <- predict(fitStepwise_model, newdata = data_jobs[test_idx, ])
+  
+  mse_results[[tfold]] <- unlist(lapply(
+    list(rf = p_rf, tree = p_tr, lrm = p_lr), 
+    function(predicted) {
+      mean((data_jobs[test_idx, "salary_in_usd"] - predicted)^2)
+    }
+  ))
+}
+
+mse_matrix <- do.call("rbind", mse_results)
+
+boxplot(mse_matrix, names = c("Random Forest", "Pruned Tree", "Linear Regression"),
+        ylab = "Cross-validated MSE")
+```
+
+The boxplot illustrates the cross-validated Mean Squared Error (MSE) for three models: Random Forest, Pruned Tree, and Linear Regression. 
+
+The Random Forest model shows the best performance, with the lowest median MSE and the smallest interquartile range (IQR), indicating that it makes the most accurate and consistent predictions. The Pruned Tree, on the other hand, has a higher MSE and a wider spread, which suggests that it is less accurate. Linear Regression performs almost as well as Random Forest, providing a similar level of accuracy and consistency.
+
+## Classification
+
+### Naive Bayes
+
+The salary_in_usd variable is converted into a binary classification problem ("High" vs. "Low") based on the median salary.
+```{r}
+data_jobs$salary_in_usd <- as.numeric(data_jobs$salary_in_usd)
+
+median_salary <- median(data_jobs$salary_in_usd, na.rm = TRUE)
+data_jobs$salary_in_usd <- as.factor(ifelse(data_jobs$salary_in_usd > median_salary, "High", "Low"))
+```
+The data is splitted into a training and a test data set. A Naive Bayes model is trained on predictors such as experience_level, company_size, and work_setting.
+```{r}
+set.seed(123)
+trainIndex <- createDataPartition(data_jobs$salary_in_usd, p = 0.8, list = FALSE)
+train_data <- data_jobs[trainIndex, ]
+test_data <- data_jobs[-trainIndex, ]
+
+model <- naiveBayes(salary_in_usd ~ experience_level + company_size + work_setting, data = train_data)
+
+predictions <- predict(model, test_data)
+```
+Predictions are made on the test set, and the confusion matrix is computed using confusionMatrix(). Key metrics such as accuracy, precision, and recall are derived. Conditional probabilities for "High" salary predictions are analyzed, highlighting the influence of features.
+```{r}
+conf_matrix <- confusionMatrix(predictions, test_data$salary_in_usd)
+print(conf_matrix)
+
+probabilities <- predict(model, test_data, type = "raw")
+
+high_salary_probabilities <- probabilities[, "High"]
+
+test_data$high_salary_probabilities <- high_salary_probabilities
+```
+The confusion matrix shows the performance of the classification model in predicting salary categories (High vs. Low).
+The model is correct 64.55% of the time. While decent, about 35% of predictions are incorrect. At 87.27%, the model is excellent at identifying High salaries, though some cases are still missed. At only 41.82%, the model struggles to identify Low salaries, often misclassifying them as High. When predicting High, it's correct 60% of the time, meaning there are many false positives. Predictions for Low are more reliable, with a precision of 76.67%.
+The Kappa score of 0.29 indicates fair agreement between predictions and actual outcomes. Overall, the model is good at detecting High salaries but performs poorly on Low salaries.
+
+## Visualizations
+
+```{r}
+ggplot(test_data, aes(x = employee_continent, y = high_salary_probabilities, fill = employee_continent)) +
+  geom_bar(stat = "summary", fun = "mean", position = "dodge") +
+  labs(
+    title = "Continent vs High Salary Probability",
+    x = "Employee Continent",
+    y = "Mean High Salary Probability"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The visualization shows the relationship between employee continents and the mean probability of earning a high salary.
+Americas has the highest mean probability of high salaries, suggesting that employees from this region are most likely to earn higher salaries.
+
+Europe and Oceania follow with moderate probabilities, indicating competitive but slightly lower high-salary chances compared to the America Asia has the lowest probability, suggesting fewer high salaries for employees in this region. Africa falls between Asia and Europe, with a relatively lower likelihood of high salaries. This suggests regional differences in salary distribution, potentially influenced by factors like industry, demand or cost of living.
+```{r}
+ggplot(test_data, aes(x = experience_level, y = high_salary_probabilities, fill = experience_level)) +
+  geom_bar(stat = "summary", fun = "mean", position = "dodge") +
+  labs(title = "Experience Level vs High Salary Probability", x = "Experience Level", y = "Mean High Salary Probability") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+This visualization examines the relationship between experience levels and the mean probability of earning a high salary.
+Executives show the highest mean probability of earning high salaries, emphasizing the strong correlation between leadership roles and higher compensation.
+Senior-level employees also have a high probability, though slightly less than executives, reflecting their advanced skills and experience.
+Mid-level professionals have a moderate probability, indicating growth potential but still not as competitive as higher levels.
+Entry-level employees have the lowest probability of high salaries, reflecting the typical compensation at the start of a career.
+The trend highlights that salary expectations increase significantly with higher levels of experience and leadership roles.
+```{r}
+ggplot(test_data, aes(x = company_size, y = high_salary_probabilities, fill = company_size)) +
+  geom_bar(stat = "summary", fun = "mean", position = "dodge") +
+  labs(title = "Company Size vs High Salary Probability", x = "Company Size", y = "Mean High Salary Probability")
+```
+
+This visualization highlights the relationship between company size and the mean probability of earning a high salary.
+Medium-sized companies exhibit the highest probability of high salaries, suggesting a competitive balance between resources and the ability to attract and retain talent.
+Large companies have a moderate probability, reflecting stable pay structures but potentially less individual salary growth compared to medium-sized firms.
+Small companies show the lowest probability, likely due to limited financial resources and budget constraints for high salaries.
+This pattern suggests that medium-sized companies might strike the optimal balance for offering higher compensation.
+```{r}
+ggplot(test_data, aes(x = work_setting, y = high_salary_probabilities, fill = work_setting)) +
+  geom_bar(stat = "summary", fun = "mean", position = "dodge") +
+  labs(title = "Work Setting vs High Salary Probability", x = "Work Setting", y = "Mean High Salary Probability")
+```
+
+This visualization examines the impact of different work settings on the probability of earning a high salary.
+In-person settings show the highest mean probability of high salaries, indicating a preference for physically present employees in roles offering higher compensation.
+Remote settings closely follow in-person roles, reflecting the growing acceptance and competitiveness of remote work for high-paying positions.
+Hybrid work settings, however, show the lowest probability of high salaries, possibly indicating less emphasis on such roles for high-paying opportunities.
+The results suggest that companies may still value physical or entirely remote presence over hybrid arrangements when offering higher salaries.
+```{r}
+conf_matrix_df <- as.data.frame(conf_matrix$table)
+
+ggplot(conf_matrix_df, aes(x = Prediction, y = Reference, fill = Freq)) +
+  geom_tile(color = "white", linewidth = 1) +  # Creates the tiles
+  scale_fill_gradient(low = "#D0B8A8", high = "#A07A56") +  # Low = light yellow, high = dark green
+  geom_text(aes(label = Freq), color = "black", size = 5) +  # Display numbers on the tiles
+  labs(title = "Confusion Matrix", x = "Predicted", y = "Actual") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
+        axis.text.y = element_text(angle = 0, hjust = 1)) +  # Ensure y-axis labels are clear
+  scale_y_discrete(limits = rev(levels(conf_matrix_df$Reference))) +  # Invert Y-axis
+  scale_x_discrete(limits = rev(levels(conf_matrix_df$Prediction)))
+```
+
+This confusion matrix visually represents the performance of the classification model in predicting high and low salaries:
+True Positives (816): High salaries correctly predicted as high.
+True Negatives (544): Low salaries correctly predicted as low.
+False Negatives (119): High salaries incorrectly predicted as low.
+False Positives (391): Low salaries incorrectly predicted as high.
+The model performs better at identifying high salaries (relatively fewer false negatives) than distinguishing low salaries (more false positives). 
+
+
+## Conclusion
+
+This project analyzed factors influencing salaries in the data job market, comparing regression models and Naive Bayes classification. While regression analyses, such as linear regression and random forests, offered insights into how predictors influence salary, their R-squared values indicated relatively low explanatory power, limiting their accuracy.
+
+In contrast, the Naive Bayes model demonstrated higher classification accuracy and better aligned with the project's goal of categorizing salaries into "High" and "Low." Its simplicity and efficiency in handling categorical variables like job category, company size, and employee continent made it the ideal choice. The model's ability to provide actionable insights for decision-making further reinforced its utility over regression.
