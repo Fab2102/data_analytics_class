@@ -1,0 +1,201 @@
+---
+title: "Group 2 - Assignment 1"
+date: "2024-10-22"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Task 1
+
+Read in the CSV file:
+```{r}
+data <- read.csv("airbnb.csv", sep=",", header = TRUE)
+```
+Looking at the data:
+```{r}
+head(data)
+str(data)
+```
+
+
+There is no missing data.
+```{r}
+sum(is.na(data))
+```
+We are turning the categorial variable room_type into a factor.
+```{r}
+data$room_type <- factor(data$room_type)
+```
+We are eliminating the index X, because we think it is not a meaningful
+predictor.
+```{r}
+data <- subset(data, select = -c(1))
+```
+We are also eliminating attr_index and rest_index because they are not on a
+standardized scale like attr_index_norm or rest_index_norm. Additionally due to
+the fact that room_type already covers the information in room_shared and
+room_private, we are going to eliminate them.
+```{r}
+data <- subset(data, select = -c(room_shared, room_private, attr_index, rest_index))
+```
+## Task 2
+
+Looking at the summary:
+```{r}
+summary(data)
+```
+Looking at the structure:
+```{r}
+str(data)
+```
+Looking at the correlation (only numeric values) these variables seem to
+be realted to realSum:
+
+person_capacity, bedrooms, dist, attr_index_norm, rest_index_norm
+
+```{r}
+numeric_columns <- sapply(data, is.numeric)
+numeric_data <- data[, numeric_columns]
+cor(data[, 1], numeric_data)
+```
+Plotting data: We use a logarithmic scale for the Y axis, as there are
+outliers in the dataset that would otherwise affect the graph negatively.
+
+
+y = realSum, x = person_capacity
+```{r}
+plot(realSum ~ person_capacity, data = data, log = "y")
+```
+y = realSum, x = bedrooms
+```{r}
+plot(realSum ~ bedrooms, data = data, log = "y")
+```
+y = realSum, x = dist
+```{r}
+plot(realSum ~ dist, data = data, log = "y")
+```
+y = realSum, x = metro_dist
+```{r}
+plot(realSum ~ metro_dist, data = data, log = "y")
+```
+y = realSum, x = attr_index_norm
+```{r}
+plot(realSum ~ attr_index_norm, data = data, log = "y")
+```
+y = realSum, x = rest_index_norm
+```{r}
+plot(realSum ~ rest_index_norm, data = data, log = "y")
+```
+## Task 3
+```{r}
+
+```
+
+Fitting a linear regression model by using all variables.
+Significant impact on price: person_capacity, bedrooms and dist
+
+```{r}
+fitAll <- lm(realSum ~ ., data = data)
+summary(fitAll)
+```
+## Task 4
+
+Performing a stepwise approach to filter out unnecessary variables.
+
+positive impact: person_capacity, bedrooms, attr_index_norm
+
+negative impact: multi, dist
+
+All coefficient signs of the variables were expected intuitively,
+the coefficient of the variable "multi" was not expected, one possible
+explanation could be that the hosts with more apartments could have economies
+of scale effects.
+
+The coefficient of "dist" is negative because the greater the distance
+to the city center the cheaper an airbnb should be.
+
+The coefficient of "weekend" is positive because prices tend to be higher
+for weekends. Possible explanations could be that demand is higher
+on weekends, thus the correlation is positive
+
+The variable "room_type" was omitted in the stepwise regression model,
+because the AIC was lower when it was not considered in the model. That means,
+that "room_type" has not a big impact on the price.
+```{r}
+fitStepwise = step(fitAll, direction = "backward")
+summary(fitStepwise)
+```
+## Task 5
+
+As expected, the stepwise model had the lower AIC.
+```{r}
+AIC(fitAll)
+AIC(fitStepwise)
+```
+## Task 6
+
+Splitting the sample into 80% train vs 20% test sample.
+```{r}
+total_rows <- nrow(data)
+eighty_percent <- floor(0.8 * total_rows)
+set.seed(123)
+
+for_training <- sample(1:total_rows, eighty_percent, replace = FALSE)
+
+train_data <- data[for_training,]
+test_data <- data[-for_training,]
+```
+Fitting the full model to the training data:
+```{r}
+model_full <- lm(realSum ~ ., data = train_data)
+summary(model_full)
+```
+Creating a stepwise regression model on the training data.
+
+The variables are ommited:
+
+room_type, host_is_superhost, biz, cleanliness_rating, guest_satisfaction_overall,
+metro_dist, lng, lat and weekend
+```{r}
+model_step <- step(model_full, direction = "backward")
+summary(model_step)
+```
+Making predictons on the test data with both models:
+```{r}
+pred_test_model_full = predict(model_full, newdata = test_data)
+pred_test_model_step = predict(model_step, newdata = test_data)
+
+pred_train_model_full <- predict(model_full, newdata = train_data)
+pred_train_model_step <- predict(model_step, newdata = train_data)
+```
+Calculate the training and the test MSE:
+```{r}
+mse_train_model_full <- mean((train_data$realSum - pred_train_model_full)^2)
+mse_train_model_step <- mean((train_data$realSum - pred_train_model_step)^2)
+
+mse_test_model_full <- mean((test_data$realSum - pred_test_model_full)^2)
+mse_test_model_step <- mean((test_data$realSum - pred_test_model_step)^2)
+```
+Displaying the training MSE:
+
+Training MSE:
+When it comes to the training MSE, the full model should be lower,
+than the stepwise model. The full model performs better.
+```{r}
+mse_train_model_full
+mse_train_model_step
+```
+Displaying the test MSE:
+
+Test MSE:
+When it comes to the test MSE, the the stepwise model should be lower,
+than the full model. The full model performs better.
+
+For the final model someone should choose the lowest test MSE.
+In this case it would be the full test model.
+```{r}
+mse_test_model_full
+mse_test_model_step
+```
