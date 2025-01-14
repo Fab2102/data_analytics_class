@@ -1,0 +1,201 @@
+---
+title: "Group 2 Assignment 2"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r}
+library(caret)
+library(e1071)
+```
+
+
+## Task 1
+
+Reading in the CSV file and looking at the head of the dataset.
+```{r}
+churn_data <- read.csv("BankChurners.csv", sep=",", header = TRUE)
+head(churn_data)
+```
+We eliminated the variables which are not helpful for the analysis:
+```{r}
+churn_data <- subset(churn_data, select = -c(1,22, 23))
+head(churn_data)
+```
+
+Looking at the structure of the dataset. There are several numerical and categorial variables.
+
+```{r}
+str(churn_data)
+```
+
+We are turning categorical variables into factors and leveled the intuitive factors.
+
+```{r}
+churn_data$Attrition_Flag <- factor(churn_data$Attrition_Flag, levels = c("Existing Customer", "Attrited Customer"))
+churn_data$Income_Category <- factor(churn_data$Income_Category, levels = c("Less than $40K", "$40K - $60K", "$60K - $80K", "$80K - $120K", "$120K +", "Unknown"))
+churn_data$Card_Category <- factor(churn_data$Card_Category, levels = c("Blue", "Silver", "Gold", "Platinum"))
+churn_data$Education_Level <- factor(churn_data$Education_Level, levels = c("Uneducated", "High School", "College", "Graduate", "Post-Graduate", "Doctorate", "Unknown"))
+churn_data$Marital_Status <- factor(churn_data$Marital_Status, levels = c("Single", "Married", "Divorced", "Unknown"))
+churn_data$Gender <- factor(churn_data$Gender)
+```
+
+From the summary, we can extract that 16.07% of customers left the bank.
+
+```{r}
+summary(churn_data)
+churn_rate <- prop.table(table(churn_data$Attrition_Flag))["Attrited Customer"] * 100
+print(paste("Churn Rate:", round(churn_rate, 2), "%"))
+```
+
+Creating graphs to investigate the relationship between features and churn:
+
+Customers with a lower Total_Relationship_Count appear to have a higher likelihood of churning. Those who have been inactive for 3 or 4 months are the most likely to churn, while customers inactive for more than 4 months tend to be less likely to leave. Additionally, fewer contacts in the last 12 months correlate with a higher probability of churn, whereas Credit_Limit seems to have minimal or no effect on whether a customer churns.
+
+
+Attrited customers generally maintain a lower Total_Revolving_Balance, which aligns with their intent to leave the credit card service. The Avg_Open_To_Buy also appears to have little to no impact on churn probability, but attrited customers consistently show a much lower Avg_Utilization_Ratio than existing customers. Significant changes in both transaction amount and transaction count indicate a lower likelihood of churn. Furthermore, attrited customers tend to have both a lower Total_Transaction_Amount and a reduced Total_Transaction_Count compared to existing customers.
+```{r}
+plot(Attrition_Flag ~ Customer_Age, data = churn_data)
+plot(Attrition_Flag ~ Gender, data = churn_data)
+plot(Attrition_Flag ~ Dependent_count, data = churn_data)
+plot(Attrition_Flag ~ Education_Level, data = churn_data)
+plot(Attrition_Flag ~ Marital_Status, data = churn_data)
+plot(Attrition_Flag ~ Income_Category, data = churn_data)
+plot(Attrition_Flag ~ Card_Category, data = churn_data)
+plot(Attrition_Flag ~ Months_on_book, data = churn_data)
+plot(Attrition_Flag ~ Total_Relationship_Count, data = churn_data)
+plot(Attrition_Flag ~ Months_Inactive_12_mon, data = churn_data)
+plot(Attrition_Flag ~ Contacts_Count_12_mon, data = churn_data)
+plot(Credit_Limit ~ Attrition_Flag, data = churn_data)
+plot(Total_Revolving_Bal ~ Attrition_Flag, data = churn_data)
+plot(Avg_Open_To_Buy ~ Attrition_Flag, data = churn_data)
+plot(Avg_Utilization_Ratio ~ Attrition_Flag, data = churn_data)
+plot(Total_Amt_Chng_Q4_Q1 ~ Total_Ct_Chng_Q4_Q1, col = as.numeric(Attrition_Flag), data = churn_data)
+plot(Total_Trans_Amt ~ Attrition_Flag, data = churn_data)
+plot(Total_Trans_Ct ~ Attrition_Flag, data = churn_data)
+```
+
+## Task 2
+
+Splitting the data into training set and test set
+
+```{r}
+set.seed(123)
+n <- nrow(churn_data)
+n1 <- floor(0.8 * n)
+train_sample <- sample(1:n, n1)
+
+train_data <- churn_data[train_sample, ]
+test_data  <- churn_data[-train_sample, ]
+```
+
+## Task 3
+
+Estimating the logistic regression model with all variables: From the model, we can now identify whether a variable has a significant impact on churn based on the p-value.
+
+Significant variables: GenderM, Dependent_count, Marital_StatusMarried, Income_Category80K - 120K, Income_Category120K +, Card_CategoryGold, Total_Relationship_Count, Months_Inactive_12_mon, Contacts_Count_12_mon, Credit_Limit, Total_Revolving_Bal, Total_Trans_Amt, Total_Trans_Ct and Total_Ct_Chng_Q4_Q1.
+
+```{r}
+logit_model <- glm(Attrition_Flag ~ ., data = train_data, family = binomial())
+summary(logit_model)
+```
+
+## Task 4
+
+Performing the stepwise model selection using AIC:
+
+The final model includes the following variables: Customer_Age, Gender, Dependent_count, Marital_Status, Income_Category, Card_Category, Total_Relationship_Count, Months_Inactive_12_mon, Contacts_Count_12_mon, Credit_Limit, Total_Revolving_Bal, Total_Amt_Chng_Q4_Q1, Total_Trans_Amt, Total_Trans_Ct, and Total_Ct_Chng_Q4_Q1.
+
+```{r}
+stepwise_model <- step(logit_model, direction = "both")
+summary(stepwise_model)
+
+AIC(logit_model, stepwise_model)
+```
+
+Each additional contact made with a costumer, changes the odds of churn by $e^{0.5104}$.
+
+The odds change by $e^{1.095}$ if a customer has a Platinum card instead of a blue credit card.
+
+The odds change by $e^{-0.00001726}$ if a customer increases the credit card limit by 1000 Dollars.
+
+## Task 5
+
+Estimating the k-NN model with different k and doing the 5 fold cross validation
+```{r}
+knn_control <- trainControl(method = "cv", number = 5)
+
+fit_knn <- train(Attrition_Flag ~ ., data=train_data, method="knn",
+                 tuneGrid = data.frame(k=c(3, 5, 7, 9, 11, 13, 15)),
+                 preProcess = "scale", trControl = knn_control)
+```
+The appropiate k-value is:
+```{r}
+print(fit_knn$bestTune[1, 1])
+```
+The final knn model:
+```{r}
+model_knn <- knn3(Attrition_Flag ~. , data=train_data,k=fit_knn$bestTune[1,1])  
+print(model_knn)
+```
+## Task 6
+
+Estimating the Naive Bayes model
+```{r}
+model_naivbay <- naiveBayes(Attrition_Flag~., data=train_data)
+print(model_naivbay)
+```
+## Task 7
+
+The most accurate model is the stepwise logistic regression model (pred_2).
+The model with the highest recall is the Naive Bayes model (pred_4).
+The model with the highest precision is the stepwise logistic regression model (pred_2).
+
+For the bank, recall is the most suitable parameter for effectively identifying customers who are likely to churn. By prioritizing recall, the bank can ensure that it captures a higher proportion of actual churners, thereby minimizing the number of false negatives. This means that more customers who are at risk of leaving the bank will be accurately identified, allowing the institution to take proactive measures to retain them. Therefore the Naive Bayes model would be the best choice here, because it has the highest recall.
+
+Prediction 1 (full logistic regression model):
+```{r}
+pred_1 <- predict(logit_model, newdata=test_data, type="response")
+outcome_pred_1 <- as.numeric(pred_1 > 0.5)
+
+table_1 <- table(predicted=outcome_pred_1, observed=test_data$Attrition_Flag)
+print(table_1)
+
+accuracy_1 <- (table_1[1,1]+table_1[2,2])/(sum(table_1))
+recall_1 <- table_1[2,2]/sum(table_1[,2])
+precision_1 <- table_1[2,2]/sum(table_1[2,])
+print(paste("Accuracy:", accuracy_1))
+print(paste("Recall:", recall_1))
+print(paste("Precision:", precision_1))
+```
+Prediction 2 (stepwise logistic regression model):
+```{r}
+pred_2 <- predict(stepwise_model, newdata=test_data, type = "response")
+outcome_pred_2 <- as.numeric(pred_2 > 0.5)
+
+table_2 <-table(predicted=outcome_pred_2, observed=test_data$Attrition_Flag)
+print(table_2)
+
+accuracy_2 <- (table_2[1,1]+table_2[2,2])/(sum(table_2))
+recall_2 <- table_2[2,2]/sum(table_2[,2])
+precision_2 <- table_2[2,2]/sum(table_2[2,])
+
+print(paste("Accuracy:", accuracy_2))
+print(paste("Recall:", recall_2))
+print(paste("Precision:", precision_2))
+```
+Prediction 3 (k-NN approach):
+```{r}
+pred_3 <- predict(fit_knn, newdata = test_data)
+conf_matr_knn <- confusionMatrix(pred_3, test_data$Attrition_Flag, positive = "Attrited Customer")
+print(conf_matr_knn)
+```
+Prediction 4 (Naive Bayes approach):
+```{r}
+pred_4 <- predict(model_naivbay, newdata = test_data)
+conf_matr_naiv_bay <- confusionMatrix(pred_4, test_data$Attrition_Flag, positive = "Attrited Customer")
+print(conf_matr_naiv_bay)
+```
+
