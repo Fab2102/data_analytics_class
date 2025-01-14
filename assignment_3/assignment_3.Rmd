@@ -1,0 +1,202 @@
+---
+title: "Group 2 Assignment 3"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+set.seed(24101968)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, error = FALSE, cache = TRUE)
+```
+Making sure all the necessary packages are being installed.
+```{r}
+library("rpart")
+library("party")
+library("partykit")
+library("ranger")
+```
+
+## Task 1
+
+Reading in the CSV file and looking at the head of the dataset. The dataset contains 20640 observations with the variables displayed in the summary() output.
+
+```{r}
+housing <- read.csv("housing.csv", stringsAsFactors = TRUE) 
+head(housing)
+summary(housing)
+```
+
+The data contains some missing values. We removed them for the subsequent analysis.
+
+```{r}
+print("Missing values per column:")
+missing_values <- colSums(is.na(housing))
+print(missing_values)
+
+cleaned_housing <- na.omit(housing)
+```
+
+We visually compared the marginal distribution of all features and the response before and after removing the missing values in a histogram.
+
+```{r}
+par(mfrow = c(2, 3))
+for (col in colnames(housing)) 
+{
+  if (is.numeric(housing[[col]])) 
+  {
+    hist(housing[[col]], main = paste("Before -", col), col = "beige", xlab = col)
+  } 
+}
+
+for (col in colnames(cleaned_housing)) 
+{
+  if (is.numeric(cleaned_housing[[col]])) 
+  {
+    hist(cleaned_housing[[col]], main = paste("After -", col), col = "orange", xlab = col)
+  } 
+}
+```
+
+We visually compared the marginal distribution of all features and the response before and after removing the missing values in a boxplot.
+
+```{r}
+par(mfrow = c(2, 3))
+for (col in colnames(housing)) 
+{
+  if (is.numeric(housing[[col]])) {
+    boxplot(housing[[col]], main = paste("Before -", col), col = "beige", ylab = col)
+  }
+}
+
+for (col in colnames(cleaned_housing)) 
+{
+  if (is.numeric(cleaned_housing[[col]])) {
+    boxplot(cleaned_housing[[col]], main = paste("After -", col), col = "orange", ylab = col)
+  }
+}
+```
+
+## Task 2
+
+First, we fit a regression tree to the data with median_house_value as the response and all other features as explanatory variables.
+
+```{r}
+tree <- rpart(median_house_value ~ ., data = housing)
+```
+Then we plot the tree.
+```{r fig.width=20, fig.height=7}
+plot(as.party(tree))
+```
+
+Interpretation: median_income, ocean_proximity, and longitude are key predictors in determining the median house value.
+
+median_income is the most significant variable affecting house prices, suggesting that higher incomes correlate with higher property values.
+
+The longitude variable indicates that geographic location (distance from a specific longitude) plays a role in house value, especially in certain regions.
+
+ocean_proximity is a significant non-numeric factor with houses closer to the ocean generally having higher values.
+
+## Task 3
+
+We now fit a random forest to the data with permutation importance.
+```{r}
+random_forest <- ranger(median_house_value ~ ., data = cleaned_housing, probability = FALSE, importance = "permutation")
+```
+Printing out the random forest which was created.
+```{r}
+print(random_forest)
+```
+Plotting the permutation importance.
+
+Interpretation:
+
+Median Income: Higher income levels typically correlate with higher property values, as more affluent areas often attract investment and quality housing.
+
+Longitude and Latitude: These geographic coordinates help capture locational effects, including proximity to desirable areas, amenities, or coastline, which significantly influence house prices.
+
+Comparing key predictors from both analyses:
+
+Median income and longitude are key in both models -> indicating their stable impact on house values.
+Task 2 found ocean_proximity important, while the random forest model highlights latitude along with longitude. This difference suggests that latitude may capture more detailed geographic information in the random forest, which can handle complex patterns better than the simpler regression tree.
+Apart from this difference, however, the overall picture was similar to the previous plot and the two methods generally agree.
+
+```{r}
+plot(as.table(importance(random_forest)), ylab = "Importance")
+```
+Creating a sequence of 20 evenly spaced values for median_income, ranging from min to the max in the cleaned_housing dataset. This sequence will be used to analyze the effect of varying income levels on housing price predictions.
+```{r}
+grd <- seq(min(cleaned_housing$median_income), max(cleaned_housing$median_income), length.out = 20)
+```
+Sampling 300 random observations from the cleaned_housing dataset to create a new subset nd. This subset will be used for making predictions while maintaining the overall characteristics of the original dataset.
+```{r}
+nd <- cleaned_housing[sample.int(nrow(cleaned_housing), 300), ]
+```
+We loop through each value in the "grd" sequence and update nd$median_income to that value. Then, we use the random_forest model to predict housing prices for the updated dataset and save all the predictions to the list "prs".
+```{r}
+prs <- lapply(grd, \(val) {
+  nd$median_income <- val
+  predict(random_forest, data = nd)$predictions
+})
+```
+
+As a result of the previous steps, we can now plot the partial dependency plot.
+
+Interpretation:
+
+When looking at the graph, there are a few trends that can be observed: In the beginning, housing prices are relatively stable- ranging from 100.000 to 200.000. This suggests that changes in income within this range have minimal impact on housing prices.
+Next, a moderate rise occurs (from 200.000 - 300.000). Lastly, there is a sharp rise in pricing. In this part, income levels have a stronger, non-linear effect on housing prices. 
+After this sharp rise between 300.000 and 500.000, stability can be observed again.
+```{r}
+matplot(grd, t(do.call("cbind", prs)), type = "l", col = rgb(.1, .1, .1, .1),
+        lty = 1, log = "x")
+```
+
+
+
+
+## Task 4
+
+We determine the total number of observations in the cleaned_housing dataset and set the number of folds for cross-validation to 10.
+```{r}
+n <- nrow(cleaned_housing)
+fold <- 10
+```
+We generate the cross-validation folds (train and test indices).
+```{r}
+folds <- sample(rep(1:fold, ceiling(n/fold)), n)
+head(folds, n = 10)
+```
+We perform a 10-fold cross-validation by fitting three different models on the training data, predicting on the test data and calculating the MSE for each model to evaluate their performance.
+```{r}
+mse_scores <- list()
+
+# loop through each fold
+for (tfold in seq_len(fold)) {
+  train_idx <- which(folds != tfold)
+  test_idx <- which(folds == tfold)
+  
+  # fit models on the training data
+  rf <- ranger(median_house_value ~ ., data = cleaned_housing[train_idx, ], probability = FALSE)
+  tree <- rpart(median_house_value ~ ., data = cleaned_housing[train_idx, ])
+  lrm <- glm(median_house_value ~ ., data = cleaned_housing[train_idx, ], family = "gaussian")
+  
+  # predict on the test data
+  p_rf <- predict(rf, data = cleaned_housing[test_idx, ])$predictions
+  p_tr <- predict(tree, newdata = cleaned_housing[test_idx, ])
+  p_lr <- predict(lrm, newdata = cleaned_housing[test_idx, ], type = "response")
+  
+  # calculate MSE score for each model
+  actual_values <- cleaned_housing[test_idx, "median_house_value"]
+  mse_scores[[tfold]] <- unlist(lapply(
+    list(rf = p_rf, tree = p_tr, lrm = p_lr), \(predicted) {
+      mean((actual_values - predicted)^2)
+    }
+  ))
+}
+```
+To visually compare the models, we create a boxplot, which shows that the random forest is by far the best choice.
+```{r}
+boxplot(do.call("rbind", mse_scores), ylab = "Cross-validated MSE")
+```
