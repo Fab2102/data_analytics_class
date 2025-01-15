@@ -1,3 +1,4 @@
 *.html linguist-generated=true
+*.Rmd linguist-detectable=true
 vignettes/*.html linguist-generated=true
 docs/* linguist-vendored
